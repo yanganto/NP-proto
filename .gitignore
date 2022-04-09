@@ -11,3 +11,5 @@
 .direnv/
 .envrc
 *.bak
+result
+result-lib

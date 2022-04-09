@@ -2,40 +2,77 @@
   description = "NP prototype";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:JJJollyjim/nixpkgs/buildrustcrate-feature";
+    utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
-    flake-utils.url = "github:numtide/flake-utils";
+    crate2nix = {
+      url = "github:kolloch/crate2nix";
+      flake = false;
+    };
+    flake-compat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
   };
 
-  outputs = { self, rust-overlay, nixpkgs, flake-utils }:
-    flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
-      let
-        overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs {
-          inherit system overlays;
-        };
-        devRust = pkgs.rust-bin.nightly."2022-03-30".default;
-      in
-      with pkgs;
-      {
-        packages.x86_64-linux.np = pkgs.rustPlatform.buildRustPackage {
-          name = "np";
-          src = self;
-          cargoSha256 = "sha256-fxBzLGVloii31sUMIHTWSGeLZAuRBZvJ2/dJYo54ZqE=";
-          buildInputs = with pkgs; [
-            openssl
-            pkgconfig
-          ];
-        };
-        defaultPackage.x86_64-linux = self.packages.x86_64-linux.np;
-        devShell = mkShell {
-          buildInputs = [
-            devRust
-            openssl
-            pkgconfig
-          ];
-          RUST_BACKTRACE = 1;
-        };
-      }
-    );
+  outputs = { self, nixpkgs, utils, rust-overlay, crate2nix, ... }:
+    let
+      name = "np";
+      rustChannel = "stable";
+    in
+    utils.lib.eachDefaultSystem
+      (system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [
+              rust-overlay.overlay
+              (self: super: {
+                rustc = self.rust-bin.${rustChannel}.latest.default;
+                cargo = self.rust-bin.${rustChannel}.latest.default;
+              })
+            ];
+          };
+          inherit (import "${crate2nix}/tools.nix" { inherit pkgs; })
+            generatedCargoNix;
+
+          project = pkgs.callPackage
+            (generatedCargoNix {
+              inherit name;
+              src = ./.;
+            })
+            {
+              defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+                ${name} = oldAttrs: {
+                  inherit buildInputs nativeBuildInputs;
+                };
+              };
+            };
+
+          buildInputs = with pkgs; [ openssl.dev ];
+          nativeBuildInputs = with pkgs; [ rustc cargo pkgconfig ];
+        in
+        rec {
+          packages.${name} = project.rootCrate.build;
+          defaultPackage = packages.${name};
+          apps.${name} = utils.lib.mkApp {
+            inherit name;
+            drv = packages.${name};
+          };
+          defaultApp = apps.${name};
+
+          devShell = pkgs.mkShell
+            {
+              inputsFrom = builtins.attrValues self.packages.${system};
+              buildInputs = buildInputs ++ (with pkgs;
+                [
+                  openssl.dev
+                  pkgs.rust-bin.${rustChannel}.latest.rust-analysis
+                  pkgs.rust-bin.${rustChannel}.latest.rls
+                  pkgconfig
+                ]);
+              RUST_SRC_PATH = "${pkgs.rust-bin.${rustChannel}.latest.rust-src}/lib/rustlib/src/rust/library";
+            };
+        }
+      );
 }
