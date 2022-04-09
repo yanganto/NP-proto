@@ -17,7 +17,7 @@ async fn query_mainnet_final_author() -> Result<AccountId, Box<dyn std::error::E
 }
 
 async fn query_testnet_final_author() -> Result<AccountId, Box<dyn std::error::Error>> {
-    let client = JsonRpcClient::connect("https://rpc.mainnet.near.org");
+    let client = JsonRpcClient::connect("https://rpc.testnet.near.org");
 
     let request = methods::block::RpcBlockRequest {
         block_reference: BlockReference::Finality(Finality::Final),
